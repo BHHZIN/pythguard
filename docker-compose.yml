@@ -1,0 +1,84 @@
+version: "3.9"
+
+# PythGuard — Docker Compose
+# Starts all 4 services: Rust reader, Marginfi JS reader, Python backend, React frontend.
+# Usage: docker compose up --build
+
+services:
+
+  # ── Rust on-chain reader (Pyth price feeds) ──────────────
+  rust-reader:
+    build:
+      context: ./rust
+      dockerfile: Dockerfile
+    container_name: pythguard-rust-reader
+    ports:
+      - "8001:8001"
+    environment:
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - RUST_READER_ADDR=0.0.0.0:8001
+      - RUST_LOG=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Marginfi JS reader (official SDK, real positions) ────
+  marginfi-reader:
+    build:
+      context: ./marginfi_reader
+      dockerfile: Dockerfile
+    container_name: pythguard-marginfi-reader
+    ports:
+      - "8002:8002"
+    environment:
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - MARGINFI_READER_PORT=8002
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Python Risk Engine + REST API ────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pythguard-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTH_PRO_ACCESS_TOKEN=${PYTH_PRO_ACCESS_TOKEN}
+      - PYTH_MCP_SERVER_URL=${PYTH_MCP_SERVER_URL:-https://mcp.pyth.network/mcp}
+      - RUST_READER_BASE_URL=http://rust-reader:8001
+      - API_CORS_ALLOWED_ORIGINS=["http://localhost:3000"]
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    depends_on:
+      rust-reader:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── React frontend ────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_BACKEND_URL=http://localhost:8000
+    container_name: pythguard-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,16 @@
+{
+  "name": "pythguard-marginfi-reader",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Marginfi position fetcher using official @mrgnlabs/marginfi-client-v2 SDK",
+  "main": "marginfi_reader.js",
+  "scripts": {
+    "start": "node marginfi_reader.js",
+    "dev":   "node --watch marginfi_reader.js"
+  },
+  "dependencies": {
+    "@mrgnlabs/marginfi-client-v2": "^0.12.0",
+    "@solana/web3.js": "^1.91.0",
+    "express": "^4.18.2"
+  }
+}

@@ -1,0 +1,37 @@
+[package]
+name    = "pythguard-reader"
+version = "0.1.0"
+edition = "2021"
+
+# PythGuard on-chain reader — reads Pyth price feeds and open positions
+# on Solana, serializes results as JSON for the Python Risk Engine.
+
+[dependencies]
+# Solana SDK for RPC client and account deserialization
+solana-client  = "1.18"
+solana-sdk     = "1.18"
+
+# Pyth SDK — price feed account deserialization + confidence intervals
+pyth-sdk-solana = "0.10"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization — output to Python backend via JSON
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling — no panics in production
+anyhow  = "1"
+thiserror = "1"
+
+# Logging
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP server to expose data to Python backend
+axum   = "0.7"
+tower  = "0.4"
+
+[dev-dependencies]
+tokio-test = "0.4"
