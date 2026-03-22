@@ -7,8 +7,8 @@
 
 ## [PythGuard — DeFi Liquidation Risk Monitor for Solana]
 
-**Team:** @your-discord-handle
-**Wallet:** your-solana-wallet-address
+**Team:** @BHHZIN
+**Wallet:** your-solana-wallet-address-here
 
 ---
 
@@ -18,6 +18,18 @@ PythGuard uses Pyth Price Feeds and Pyth Pro confidence intervals to monitor
 open lending positions on Solana in real time. It computes a 0–100 risk score
 using the oracle's confidence interval — a signal most DeFi apps ignore — to
 warn users before liquidation happens, not after. Supports Marginfi and Kamino.
+
+---
+
+## Note for Judges
+
+**Demo Mode** (default, no wallet needed) showcases all features with
+simulated Pyth-style confidence intervals that update in real time — feed bar,
+risk gauges, confidence charts, alert messages.
+
+**Live Mode** activates when connecting a Phantom wallet with active lending
+or borrowing positions on Marginfi or Kamino. Without open positions, the app
+correctly shows "No positions found" — this is expected behavior, not a bug.
 
 ---
 
@@ -31,6 +43,10 @@ The key insight: Pyth publishes not just a price, but also how *certain* it is
 about that price (the confidence interval). When confidence widens, the market
 is disagreeing on price — exactly when liquidations spike. PythGuard makes this
 visible before it becomes a problem.
+
+Notably, Marginfi itself uses Pyth confidence intervals internally when
+calculating liquidation thresholds (bottom of the 95% confidence band).
+PythGuard surfaces that same signal directly to users.
 
 ---
 
@@ -46,7 +62,7 @@ visible before it becomes a problem.
 
 ---
 
-## How the Risk Score Works
+## Risk Score Formula
 
 ```
 Score (0–100) =
@@ -63,27 +79,27 @@ Score < 45 → LOW (healthy)
 
 ## Technical Stack
 
-- **Rust** — On-chain reader: reads Pyth price feed accounts + Marginfi positions
-  from Solana RPC, exposes JSON over internal HTTP
+- **Rust** — On-chain reader: reads Pyth price feed accounts + Marginfi
+  positions from Solana RPC, exposes JSON over internal HTTP
 - **Python (FastAPI)** — Risk Engine: computes scores, calls Pyth Pro MCP,
   exposes REST API
 - **Node.js** — Marginfi SDK reader using official @mrgnlabs/marginfi-client-v2
-- **React** — Dashboard: wallet connect, live risk meters, confidence chart
+- **React** — Dashboard: wallet connect, DEMO/LIVE toggle, live risk meters,
+  confidence chart per position
 
 ---
 
-## Demo
+## Links
 
-Live demo (no wallet needed): https://pythguard.your-deployment.com
-
-GitHub: https://github.com/your-handle/pythguard
+- **Live Demo:** https://pythguard.vercel.app *(update with real URL)*
+- **GitHub:** https://github.com/BHHZIN/pythguard
 
 ---
 
 ## Content Links
 
-- Reddit post: https://reddit.com/r/solana/comments/your-post
-- Dev.to article: https://dev.to/your-handle/pythguard
+- Reddit post: *(add link after posting)*
+- Dev.to article: *(optional)*
 
 ---
 

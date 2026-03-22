@@ -7,6 +7,18 @@
 
 ---
 
+## ⚡ Live Demo
+
+**→ [pythguard.vercel.app](https://pythguard.vercel.app)** *(update with real URL after deploy)*
+
+> **For judges & reviewers:** Demo Mode is active by default — no wallet needed.
+> It showcases all features with simulated Pyth-style data that updates in real time.
+> **Live Mode** activates when you connect a Phantom wallet with active lending or
+> borrowing positions on **Marginfi** or **Kamino**. Without open positions, the app
+> correctly shows "No positions found".
+
+---
+
 ## What PythGuard Does
 
 Most DeFi users get liquidated not because prices crashed unexpectedly —
@@ -32,25 +44,26 @@ itself uses this internally for liquidation thresholds. PythGuard exposes it to 
 - 📊 **Confidence ratio chart** — 30-minute live chart per position (click ▼ Chart)
 - 💥 **Liquidation buffer estimate** — "your SOL position is 12.4% from liquidation"
 - 📡 **Live Pyth feed bar** — confidence ratios for all supported assets at a glance
-- 🎭 **Demo mode** — full dashboard works immediately, no wallet needed
-- 🔔 **Telegram alerts** — DM when any position crosses HIGH risk
+- 🎭 **Demo Mode** — full dashboard works immediately, no wallet needed
+- 🔔 **Telegram alerts** — DM when any position crosses HIGH risk (75+)
+- 🔄 **DEMO / LIVE toggle** — seamless switch via wallet connect button
 - 🔐 **Read-only** — PythGuard never requests signing permissions
 
 ---
 
 ## Quick Start — Windows
 
-**Double-click the scripts in order:**
+Double-click the scripts in order:
 
 ```
 scripts/
-├── 1_rodar_backend.bat    ← roda primeiro
-├── 2_rodar_frontend.bat   ← roda em outro terminal
-├── 3_rodar_testes.bat     ← opcional: roda os testes
-└── 4_alertas_telegram.bat ← opcional: alertas Telegram
+├── 1_rodar_backend.bat    ← run first
+├── 2_rodar_frontend.bat   ← run in second terminal
+├── 3_rodar_testes.bat     ← optional: run tests
+└── 4_alertas_telegram.bat ← optional: Telegram alerts
 ```
 
-**Before running:** edit `.env` in the root folder and add:
+Before running: edit `.env` in the root folder and set:
 ```
 PYTH_PRO_ACCESS_TOKEN=your_token_here
 ```
@@ -115,9 +128,9 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for full technical breakdown.
 # Windows: double-click scripts/3_rodar_testes.bat
 
 # Mac/Linux:
-cd backend
-source venv/bin/activate
+cd backend && source venv/bin/activate
 pytest tests/ -v --cov=app/core
+# 46 tests, 87% coverage
 ```
 
 ---

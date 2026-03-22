@@ -1,9 +1,8 @@
 /**
  * PythGuard — Main application page.
  *
- * Demo mode is the default state — the dashboard is always
- * populated with live-feeling data, even without a wallet.
- * Connecting a wallet switches to real on-chain data.
+ * Demo mode is the default state — always populated with live-feeling data.
+ * Connecting a wallet switches to Live Mode (real on-chain data).
  */
 import { useState, useEffect } from "react";
 import {
@@ -39,6 +38,7 @@ export default function App() {
 function PythGuardDashboard() {
   const [connectedWalletAddress, setConnectedWalletAddress] = useState(null);
   const [confidenceHistories, setConfidenceHistories]       = useState({});
+  const [showJudgeNotice, setShowJudgeNotice]               = useState(true);
 
   const {
     riskSummary,
@@ -48,7 +48,7 @@ function PythGuardDashboard() {
     refreshRiskData,
   } = useRiskScore(connectedWalletAddress);
 
-  // Pre-fetch confidence histories for all positions when demo data loads
+  // Pre-fetch confidence histories for demo positions
   useEffect(() => {
     if (!isDemoMode || !riskSummary) return;
     riskSummary.positions.forEach(async (position) => {
@@ -56,16 +56,14 @@ function PythGuardDashboard() {
       if (confidenceHistories[ticker]) return;
       try {
         const historyData = await fetchDemoConfidenceHistory(ticker);
-        setConfidenceHistories(prev => ({
-          ...prev,
-          [ticker]: historyData.history,
-        }));
+        setConfidenceHistories(prev => ({ ...prev, [ticker]: historyData.history }));
       } catch { /* silently skip */ }
     });
   }, [riskSummary, isDemoMode]);
 
   return (
     <div style={pageStyle}>
+
       {/* ── Header ─────────────────────────────────────── */}
       <header style={headerStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -80,15 +78,51 @@ function PythGuardDashboard() {
             DeFi Risk Monitor · Solana · Powered by Pyth
           </span>
         </div>
+
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {isDemoMode && (
-            <span style={demoBadgeStyle}>
-              DEMO — connect wallet for live data
+          {/* DEMO / LIVE mode indicator */}
+          <div style={modeIndicatorStyle(isDemoMode)}>
+            <div style={{
+              width: "7px", height: "7px", borderRadius: "50%",
+              background: isDemoMode ? "#f59e0b" : "#22c55e",
+              boxShadow: isDemoMode ? "0 0 6px #f59e0b" : "0 0 6px #22c55e",
+            }} />
+            <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "1px" }}>
+              {isDemoMode ? "DEMO MODE" : "LIVE MODE"}
             </span>
-          )}
+          </div>
           <ConnectWallet onWalletConnected={setConnectedWalletAddress} />
         </div>
       </header>
+
+      {/* ── Judge Notice Banner ─────────────────────────── */}
+      {showJudgeNotice && (
+        <div style={judgeBannerStyle}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+            <span style={{ fontSize: "16px", flexShrink: 0 }}>ℹ️</span>
+            <div>
+              <span style={{ color: "#93c5fd", fontWeight: 600, fontSize: "13px" }}>
+                For judges & reviewers:{" "}
+              </span>
+              <span style={{ color: "#94a3b8", fontSize: "13px" }}>
+                <strong style={{ color: "#e2e8f0" }}>Demo Mode</strong> is active by default — no wallet needed.
+                It showcases all features with simulated Pyth-style confidence intervals that update in real time.{" "}
+                <strong style={{ color: "#e2e8f0" }}>Live Mode</strong> activates when you connect a Phantom wallet
+                that has active lending or borrowing positions on{" "}
+                <strong style={{ color: "#e2e8f0" }}>Marginfi</strong> or{" "}
+                <strong style={{ color: "#e2e8f0" }}>Kamino</strong>.
+                Without open positions, the app correctly shows "No positions found".
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowJudgeNotice(false)}
+            style={{ background: "transparent", border: "none", color: "#475569", cursor: "pointer", fontSize: "18px", flexShrink: 0, padding: "0 4px" }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* ── Live Pyth feed bar ──────────────────────────── */}
       <FeedStatusBar isDemoMode={isDemoMode} />
@@ -106,7 +140,10 @@ function PythGuardDashboard() {
 
         {/* Loading */}
         {isLoadingRiskData && !riskSummary && (
-          <EmptyState title="Loading risk data…" description="Fetching Pyth price feeds and confidence intervals." />
+          <EmptyState
+            title="Loading risk data…"
+            description="Fetching Pyth price feeds and confidence intervals."
+          />
         )}
 
         {/* Summary + positions */}
@@ -122,8 +159,15 @@ function PythGuardDashboard() {
               <div style={{ display: "flex", gap: "28px", alignItems: "center", flexWrap: "wrap" }}>
                 <SummaryMetric label="OPEN POSITIONS" value={riskSummary.position_count} />
                 <SummaryMetric
+                  label="MODE"
+                  value={isDemoMode ? "DEMO" : "LIVE"}
+                  color={isDemoMode ? "#f59e0b" : "#22c55e"}
+                />
+                <SummaryMetric
                   label="WALLET"
-                  value={isDemoMode ? "DEMO" : `${connectedWalletAddress.slice(0,6)}…${connectedWalletAddress.slice(-4)}`}
+                  value={isDemoMode
+                    ? "Not connected"
+                    : `${connectedWalletAddress.slice(0,6)}…${connectedWalletAddress.slice(-4)}`}
                   mono
                 />
                 <SummaryMetric
@@ -131,32 +175,49 @@ function PythGuardDashboard() {
                   value={new Date(riskSummary.computed_at_timestamp * 1000).toLocaleTimeString()}
                 />
               </div>
-              <button onClick={refreshRiskData} style={refreshBtnStyle}>
-                ↻ Refresh
-              </button>
+              <button onClick={refreshRiskData} style={refreshBtnStyle}>↻ Refresh</button>
             </div>
 
-            {/* Position cards */}
-            {riskSummary.position_count === 0 ? (
-              <EmptyState
-                title="No open positions found"
-                description="No active lending or borrowing positions detected on Marginfi or Kamino for this wallet."
-              />
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                {riskSummary.positions.map((position, idx) => {
-                  const ticker = position.collateral_asset.replace("/USD", "");
-                  return (
-                    <PositionCard
-                      key={`${position.protocol_name}-${idx}`}
-                      position={position}
-                      confidenceHistory={confidenceHistories[ticker] || []}
-                      isDemo={isDemoMode}
-                    />
-                  );
-                })}
+            {/* No positions — with context for live mode */}
+            {riskSummary.position_count === 0 && (
+              <div style={noPositionsBoxStyle}>
+                <div style={{ fontSize: "32px", marginBottom: "12px" }}>🔍</div>
+                <h2 style={{ color: "#e2e8f0", margin: "0 0 10px", fontSize: "18px" }}>
+                  No open positions found
+                </h2>
+                <p style={{ color: "#64748b", maxWidth: "500px", margin: "0 auto 16px", lineHeight: 1.6, fontSize: "14px" }}>
+                  No active lending or borrowing positions were detected for this wallet
+                  on Marginfi or Kamino.
+                </p>
+                {!isDemoMode && (
+                  <div style={liveHintStyle}>
+                    <strong style={{ color: "#93c5fd" }}>Live Mode tip:</strong>
+                    <span style={{ color: "#64748b" }}>
+                      {" "}To see real risk scores, use a wallet with open positions on{" "}
+                      <a href="https://app.marginfi.com" target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>Marginfi</a>
+                      {" "}or{" "}
+                      <a href="https://app.kamino.finance" target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>Kamino</a>.
+                      {" "}Or disconnect your wallet to use Demo Mode.
+                    </span>
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Position cards */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {riskSummary.positions.map((position, idx) => {
+                const ticker = position.collateral_asset.replace("/USD", "");
+                return (
+                  <PositionCard
+                    key={`${position.protocol_name}-${idx}`}
+                    position={position}
+                    confidenceHistory={confidenceHistories[ticker] || []}
+                    isDemo={isDemoMode}
+                  />
+                );
+              })}
+            </div>
           </>
         )}
       </main>
@@ -164,7 +225,12 @@ function PythGuardDashboard() {
       {/* ── Footer ─────────────────────────────────────── */}
       <footer style={footerStyle}>
         <span>PythGuard · Apache 2.0 · Pyth Community Hackathon 2026</span>
-        <a href="https://github.com/your-handle/pythguard" target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>
+        <a
+          href="https://github.com/BHHZIN/pythguard"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "#6366f1" }}
+        >
           GitHub →
         </a>
       </footer>
@@ -185,11 +251,11 @@ function EmptyState({ title, description }) {
   );
 }
 
-function SummaryMetric({ label, value, mono = false }) {
+function SummaryMetric({ label, value, mono = false, color = "#e2e8f0" }) {
   return (
     <div style={{ textAlign: "center" }}>
       <div style={{ color: "#475569", fontSize: "10px", letterSpacing: "1px", marginBottom: "4px" }}>{label}</div>
-      <div style={{ color: "#e2e8f0", fontSize: "14px", fontWeight: 600, fontFamily: mono ? "monospace" : "inherit" }}>{value}</div>
+      <div style={{ color, fontSize: "14px", fontWeight: 600, fontFamily: mono ? "monospace" : "inherit" }}>{value}</div>
     </div>
   );
 }
@@ -198,12 +264,22 @@ function SummaryMetric({ label, value, mono = false }) {
 // Styles
 // ─────────────────────────────────────────────────────────────
 
-const pageStyle      = { minHeight: "100vh", background: "#020817", color: "#e2e8f0", fontFamily: "'Inter', system-ui, sans-serif" };
-const headerStyle    = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderBottom: "1px solid #1e293b", background: "#020817" };
+const pageStyle       = { minHeight: "100vh", background: "#020817", color: "#e2e8f0", fontFamily: "'Inter', system-ui, sans-serif" };
+const headerStyle     = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderBottom: "1px solid #1e293b", background: "#020817" };
 const mainContentStyle = { maxWidth: "900px", margin: "0 auto", padding: "28px 24px" };
 const summaryRowStyle  = { display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0f172a", border: "1px solid #1e293b", borderRadius: "16px", padding: "18px 28px", marginBottom: "24px", flexWrap: "wrap", gap: "16px" };
-const footerStyle    = { display: "flex", justifyContent: "space-between", padding: "18px 24px", borderTop: "1px solid #1e293b", color: "#334155", fontSize: "12px" };
+const footerStyle     = { display: "flex", justifyContent: "space-between", padding: "18px 24px", borderTop: "1px solid #1e293b", color: "#334155", fontSize: "12px" };
 const errorBannerStyle = { background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.3)", borderRadius: "8px", padding: "12px 16px", color: "#fca5a5", fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" };
-const retryBtnStyle  = { background: "transparent", border: "1px solid #ef4444", color: "#ef4444", padding: "4px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" };
-const refreshBtnStyle = { background: "transparent", border: "1px solid #1e293b", color: "#94a3b8", padding: "7px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "12px", transition: "border-color .2s" };
-const demoBadgeStyle  = { background: "#1e293b", border: "1px solid #334155", color: "#64748b", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", letterSpacing: "0.5px" };
+const retryBtnStyle   = { background: "transparent", border: "1px solid #ef4444", color: "#ef4444", padding: "4px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" };
+const refreshBtnStyle  = { background: "transparent", border: "1px solid #1e293b", color: "#94a3b8", padding: "7px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "12px" };
+const judgeBannerStyle = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", padding: "12px 24px", background: "rgba(99,102,241,0.06)", borderBottom: "1px solid rgba(99,102,241,0.15)" };
+const noPositionsBoxStyle = { textAlign: "center", padding: "48px 24px", background: "#0f172a", border: "1px solid #1e293b", borderRadius: "16px", marginBottom: "20px" };
+const liveHintStyle   = { display: "inline-block", background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "8px", padding: "10px 16px", fontSize: "13px", maxWidth: "520px", lineHeight: 1.6 };
+
+const modeIndicatorStyle = (isDemo) => ({
+  display: "flex", alignItems: "center", gap: "6px",
+  background: isDemo ? "rgba(245,158,11,0.08)" : "rgba(34,197,94,0.08)",
+  border: `1px solid ${isDemo ? "rgba(245,158,11,0.25)" : "rgba(34,197,94,0.25)"}`,
+  color: isDemo ? "#f59e0b" : "#22c55e",
+  padding: "5px 12px", borderRadius: "20px",
+});
