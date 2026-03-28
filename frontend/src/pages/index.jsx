@@ -1,8 +1,10 @@
 /**
  * PythGuard — Main application page.
  *
- * Demo mode is the default state — always populated with live-feeling data.
- * Connecting a wallet switches to Live Mode (real on-chain data).
+ * Three modes:
+ *   🟡 DEMO    — default, simulated data, no wallet needed
+ *   🔵 WATCH   — enter any wallet address, view real positions (read-only)
+ *   🟢 LIVE    — connect your own Phantom wallet
  */
 import { useState, useEffect } from "react";
 import {
@@ -14,6 +16,7 @@ import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 import { ConnectWallet } from "../components/Wallet/ConnectWallet";
+import { WatchWallet } from "../components/Wallet/WatchWallet";
 import { FeedStatusBar } from "../components/Dashboard/FeedStatusBar";
 import { PositionCard } from "../components/Dashboard/PositionCard";
 import { RiskMeter } from "../components/Dashboard/RiskMeter";
@@ -37,16 +40,24 @@ export default function App() {
 
 function PythGuardDashboard() {
   const [connectedWalletAddress, setConnectedWalletAddress] = useState(null);
+  const [watchedWalletAddress, setWatchedWalletAddress]     = useState(null);
   const [confidenceHistories, setConfidenceHistories]       = useState({});
   const [showJudgeNotice, setShowJudgeNotice]               = useState(true);
+  const [showWatchInput, setShowWatchInput]                  = useState(false);
 
   const {
     riskSummary,
     isLoadingRiskData,
     riskDataError,
     isDemoMode,
+    isWatchMode,
+    isLiveMode,
     refreshRiskData,
-  } = useRiskScore(connectedWalletAddress);
+  } = useRiskScore(connectedWalletAddress, watchedWalletAddress);
+
+  // Determine mode label and color
+  const modeLabel = isLiveMode ? "LIVE MODE" : isWatchMode ? "WATCHING" : "DEMO MODE";
+  const modeColor = isLiveMode ? "#22c55e" : isWatchMode ? "#60a5fa" : "#f59e0b";
 
   // Pre-fetch confidence histories for demo positions
   useEffect(() => {
@@ -60,6 +71,23 @@ function PythGuardDashboard() {
       } catch { /* silently skip */ }
     });
   }, [riskSummary, isDemoMode]);
+
+  // Clear watch when own wallet connects
+  useEffect(() => {
+    if (connectedWalletAddress) {
+      setWatchedWalletAddress(null);
+      setShowWatchInput(false);
+    }
+  }, [connectedWalletAddress]);
+
+  function handleWatch(address) {
+    setWatchedWalletAddress(address);
+    setShowWatchInput(false);
+  }
+
+  function handleClearWatch() {
+    setWatchedWalletAddress(null);
+  }
 
   return (
     <div style={pageStyle}>
@@ -79,18 +107,37 @@ function PythGuardDashboard() {
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {/* DEMO / LIVE mode indicator */}
-          <div style={modeIndicatorStyle(isDemoMode)}>
-            <div style={{
-              width: "7px", height: "7px", borderRadius: "50%",
-              background: isDemoMode ? "#f59e0b" : "#22c55e",
-              boxShadow: isDemoMode ? "0 0 6px #f59e0b" : "0 0 6px #22c55e",
-            }} />
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+
+          {/* Mode indicator */}
+          <div style={modeIndicatorStyle(modeColor)}>
+            <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: modeColor, boxShadow: `0 0 6px ${modeColor}` }} />
             <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "1px" }}>
-              {isDemoMode ? "DEMO MODE" : "LIVE MODE"}
+              {modeLabel}
             </span>
           </div>
+
+          {/* Watch wallet toggle */}
+          {!isLiveMode && !isWatchMode && (
+            <button
+              onClick={() => setShowWatchInput(prev => !prev)}
+              style={watchToggleButtonStyle}
+              title="Watch any wallet address"
+            >
+              👁 Watch wallet
+            </button>
+          )}
+
+          {/* Watch wallet input or active state */}
+          {(showWatchInput || isWatchMode) && !isLiveMode && (
+            <WatchWallet
+              onWatch={handleWatch}
+              onClear={handleClearWatch}
+              currentWatchedAddress={watchedWalletAddress}
+            />
+          )}
+
+          {/* Connect own wallet */}
           <ConnectWallet onWalletConnected={setConnectedWalletAddress} />
         </div>
       </header>
@@ -101,26 +148,19 @@ function PythGuardDashboard() {
           <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
             <span style={{ fontSize: "16px", flexShrink: 0 }}>ℹ️</span>
             <div>
-              <span style={{ color: "#93c5fd", fontWeight: 600, fontSize: "13px" }}>
-                For judges & reviewers:{" "}
-              </span>
+              <span style={{ color: "#93c5fd", fontWeight: 600, fontSize: "13px" }}>For judges & reviewers: </span>
               <span style={{ color: "#94a3b8", fontSize: "13px" }}>
-                <strong style={{ color: "#e2e8f0" }}>Demo Mode</strong> is active by default — no wallet needed.
-                It showcases all features with simulated Pyth-style confidence intervals that update in real time.{" "}
-                <strong style={{ color: "#e2e8f0" }}>Live Mode</strong> activates when you connect a Phantom wallet
-                that has active lending or borrowing positions on{" "}
-                <strong style={{ color: "#e2e8f0" }}>Marginfi</strong> or{" "}
-                <strong style={{ color: "#e2e8f0" }}>Kamino</strong>.
-                Without open positions, the app correctly shows "No positions found".
+                <strong style={{ color: "#f59e0b" }}>Demo Mode</strong> — active by default, no wallet needed.{" "}
+                <strong style={{ color: "#60a5fa" }}>Watch Mode</strong> — paste any Solana wallet to view real positions read-only.{" "}
+                <strong style={{ color: "#22c55e" }}>Live Mode</strong> — connect your own Phantom wallet.
+                Live & Watch modes require open positions on <strong style={{ color: "#e2e8f0" }}>Marginfi</strong> or <strong style={{ color: "#e2e8f0" }}>Kamino</strong>.
               </span>
             </div>
           </div>
           <button
             onClick={() => setShowJudgeNotice(false)}
-            style={{ background: "transparent", border: "none", color: "#475569", cursor: "pointer", fontSize: "18px", flexShrink: 0, padding: "0 4px" }}
-          >
-            ×
-          </button>
+            style={{ background: "transparent", border: "none", color: "#475569", cursor: "pointer", fontSize: "18px", flexShrink: 0 }}
+          >×</button>
         </div>
       )}
 
@@ -130,7 +170,6 @@ function PythGuardDashboard() {
       {/* ── Main content ───────────────────────────────── */}
       <main style={mainContentStyle}>
 
-        {/* Error banner */}
         {riskDataError && (
           <div style={errorBannerStyle}>
             ⚠️ {riskDataError}
@@ -138,36 +177,38 @@ function PythGuardDashboard() {
           </div>
         )}
 
-        {/* Loading */}
         {isLoadingRiskData && !riskSummary && (
           <EmptyState
             title="Loading risk data…"
-            description="Fetching Pyth price feeds and confidence intervals."
+            description={
+              isWatchMode
+                ? `Scanning positions for ${watchedWalletAddress?.slice(0,6)}…${watchedWalletAddress?.slice(-4)}`
+                : "Fetching Pyth price feeds and confidence intervals."
+            }
           />
         )}
 
-        {/* Summary + positions */}
         {riskSummary && (
           <>
-            {/* Overall summary row */}
+            {/* Summary row */}
             <div style={summaryRowStyle}>
               <RiskMeter
                 riskScore={riskSummary.highest_risk_score}
                 riskLevel={riskSummary.overall_risk_level}
                 label="Overall Risk"
               />
-              <div style={{ display: "flex", gap: "28px", alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: "24px", alignItems: "center", flexWrap: "wrap" }}>
                 <SummaryMetric label="OPEN POSITIONS" value={riskSummary.position_count} />
-                <SummaryMetric
-                  label="MODE"
-                  value={isDemoMode ? "DEMO" : "LIVE"}
-                  color={isDemoMode ? "#f59e0b" : "#22c55e"}
-                />
+                <SummaryMetric label="MODE" value={modeLabel} color={modeColor} />
                 <SummaryMetric
                   label="WALLET"
-                  value={isDemoMode
-                    ? "Not connected"
-                    : `${connectedWalletAddress.slice(0,6)}…${connectedWalletAddress.slice(-4)}`}
+                  value={
+                    isLiveMode
+                      ? `${connectedWalletAddress.slice(0,6)}…${connectedWalletAddress.slice(-4)}`
+                      : isWatchMode
+                      ? `${watchedWalletAddress.slice(0,6)}…${watchedWalletAddress.slice(-4)}`
+                      : "Not connected"
+                  }
                   mono
                 />
                 <SummaryMetric
@@ -178,7 +219,7 @@ function PythGuardDashboard() {
               <button onClick={refreshRiskData} style={refreshBtnStyle}>↻ Refresh</button>
             </div>
 
-            {/* No positions — with context for live mode */}
+            {/* No positions found */}
             {riskSummary.position_count === 0 && (
               <div style={noPositionsBoxStyle}>
                 <div style={{ fontSize: "32px", marginBottom: "12px" }}>🔍</div>
@@ -186,18 +227,17 @@ function PythGuardDashboard() {
                   No open positions found
                 </h2>
                 <p style={{ color: "#64748b", maxWidth: "500px", margin: "0 auto 16px", lineHeight: 1.6, fontSize: "14px" }}>
-                  No active lending or borrowing positions were detected for this wallet
-                  on Marginfi or Kamino.
+                  No active lending or borrowing positions detected on Marginfi or Kamino.
                 </p>
-                {!isDemoMode && (
+                {(isWatchMode || isLiveMode) && (
                   <div style={liveHintStyle}>
-                    <strong style={{ color: "#93c5fd" }}>Live Mode tip:</strong>
+                    <strong style={{ color: "#93c5fd" }}>Tip: </strong>
                     <span style={{ color: "#64748b" }}>
-                      {" "}To see real risk scores, use a wallet with open positions on{" "}
+                      Try a wallet with open positions on{" "}
                       <a href="https://app.marginfi.com" target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>Marginfi</a>
                       {" "}or{" "}
                       <a href="https://app.kamino.finance" target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>Kamino</a>.
-                      {" "}Or disconnect your wallet to use Demo Mode.
+                      {" "}Or use the example wallets in the Watch input above.
                     </span>
                   </div>
                 )}
@@ -225,12 +265,7 @@ function PythGuardDashboard() {
       {/* ── Footer ─────────────────────────────────────── */}
       <footer style={footerStyle}>
         <span>PythGuard · Apache 2.0 · Pyth Community Hackathon 2026</span>
-        <a
-          href="https://github.com/BHHZIN/pythguard"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: "#6366f1" }}
-        >
+        <a href="https://github.com/BHHZIN/pythguard" target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>
           GitHub →
         </a>
       </footer>
@@ -264,22 +299,22 @@ function SummaryMetric({ label, value, mono = false, color = "#e2e8f0" }) {
 // Styles
 // ─────────────────────────────────────────────────────────────
 
-const pageStyle       = { minHeight: "100vh", background: "#020817", color: "#e2e8f0", fontFamily: "'Inter', system-ui, sans-serif" };
-const headerStyle     = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderBottom: "1px solid #1e293b", background: "#020817" };
+const pageStyle        = { minHeight: "100vh", background: "#020817", color: "#e2e8f0", fontFamily: "'Inter', system-ui, sans-serif" };
+const headerStyle      = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderBottom: "1px solid #1e293b", background: "#020817", flexWrap: "wrap", gap: "10px" };
 const mainContentStyle = { maxWidth: "900px", margin: "0 auto", padding: "28px 24px" };
 const summaryRowStyle  = { display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0f172a", border: "1px solid #1e293b", borderRadius: "16px", padding: "18px 28px", marginBottom: "24px", flexWrap: "wrap", gap: "16px" };
-const footerStyle     = { display: "flex", justifyContent: "space-between", padding: "18px 24px", borderTop: "1px solid #1e293b", color: "#334155", fontSize: "12px" };
+const footerStyle      = { display: "flex", justifyContent: "space-between", padding: "18px 24px", borderTop: "1px solid #1e293b", color: "#334155", fontSize: "12px" };
 const errorBannerStyle = { background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.3)", borderRadius: "8px", padding: "12px 16px", color: "#fca5a5", fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" };
-const retryBtnStyle   = { background: "transparent", border: "1px solid #ef4444", color: "#ef4444", padding: "4px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" };
+const retryBtnStyle    = { background: "transparent", border: "1px solid #ef4444", color: "#ef4444", padding: "4px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" };
 const refreshBtnStyle  = { background: "transparent", border: "1px solid #1e293b", color: "#94a3b8", padding: "7px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "12px" };
 const judgeBannerStyle = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", padding: "12px 24px", background: "rgba(99,102,241,0.06)", borderBottom: "1px solid rgba(99,102,241,0.15)" };
 const noPositionsBoxStyle = { textAlign: "center", padding: "48px 24px", background: "#0f172a", border: "1px solid #1e293b", borderRadius: "16px", marginBottom: "20px" };
-const liveHintStyle   = { display: "inline-block", background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "8px", padding: "10px 16px", fontSize: "13px", maxWidth: "520px", lineHeight: 1.6 };
-
-const modeIndicatorStyle = (isDemo) => ({
+const liveHintStyle    = { display: "inline-block", background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "8px", padding: "10px 16px", fontSize: "13px", maxWidth: "520px", lineHeight: 1.6 };
+const watchToggleButtonStyle = { background: "transparent", border: "1px solid #1e293b", borderRadius: "8px", color: "#64748b", fontSize: "12px", padding: "6px 12px", cursor: "pointer" };
+const modeIndicatorStyle = (color) => ({
   display: "flex", alignItems: "center", gap: "6px",
-  background: isDemo ? "rgba(245,158,11,0.08)" : "rgba(34,197,94,0.08)",
-  border: `1px solid ${isDemo ? "rgba(245,158,11,0.25)" : "rgba(34,197,94,0.25)"}`,
-  color: isDemo ? "#f59e0b" : "#22c55e",
+  background: `${color}14`,
+  border: `1px solid ${color}40`,
+  color: color,
   padding: "5px 12px", borderRadius: "20px",
 });
