@@ -10,6 +10,7 @@ The JS reader is the most reliable for Kamino since the REST API
 doesn't have a simple public user-obligations endpoint.
 """
 from __future__ import annotations
+import os
 
 import asyncio
 import structlog
@@ -20,8 +21,8 @@ from app.protocols.marginfi_public_api import fetch_marginfi_positions_for_walle
 from app.protocols.kamino_public_api import fetch_kamino_positions_for_wallet
 
 logger = structlog.get_logger(__name__)
-
-POSITION_READER_JS_URL = "http://localhost:8002"
+POSITION_READER_JS_URL = os.getenv(
+    "POSITION_READER_URL", "http://localhost:8002")
 
 
 async def fetch_positions_for_wallet(
@@ -42,7 +43,7 @@ async def fetch_positions_for_wallet(
             timeout=25.0,  # SDK calls take longer than REST
         )
         js_response.raise_for_status()
-        payload      = js_response.json()
+        payload = js_response.json()
         all_positions = payload.get("open_positions", [])
 
         logger.info(
@@ -55,9 +56,11 @@ async def fetch_positions_for_wallet(
         return all_positions
 
     except (httpx.ConnectError, httpx.TimeoutException):
-        logger.info("js_reader_unavailable_using_public_apis", wallet=wallet_address[:8])
+        logger.info("js_reader_unavailable_using_public_apis",
+                    wallet=wallet_address[:8])
     except httpx.HTTPStatusError as http_error:
-        logger.warning("js_reader_http_error", status=http_error.response.status_code)
+        logger.warning("js_reader_http_error",
+                       status=http_error.response.status_code)
 
     # ── 2. Rust reader fallback (Marginfi only) ─────────────────────
     try:
@@ -104,8 +107,9 @@ async def fetch_positions_for_wallet(
         return_exceptions=True,
     )
 
-    marginfi_positions = marginfi_result if isinstance(marginfi_result, list) else []
-    kamino_positions   = kamino_result   if isinstance(kamino_result, list)   else []
+    marginfi_positions = marginfi_result if isinstance(
+        marginfi_result, list) else []
+    kamino_positions = kamino_result if isinstance(kamino_result, list) else []
 
     all_positions = marginfi_positions + kamino_positions
 
