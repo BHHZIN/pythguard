@@ -1,116 +1,105 @@
 /**
  * PythGuard Position Reader — Marginfi + Kamino
  *
- * Reads open lending/borrowing positions from both protocols
- * for any Solana wallet. Exposes a single unified endpoint:
- *
- *   GET /positions/:walletAddress
- *
- * Uses official SDKs:
- *   - @mrgnlabs/marginfi-client-v2  for Marginfi
- *   - @kamino-finance/klend-sdk     for Kamino
- *
- * Port: 8002 (configured via POSITION_READER_PORT env var)
+ * Fixed for:
+ *   - Marginfi SDK v6: getConfig("production") string, not Environment.PRODUCTION
+ *   - Kamino klend-sdk v1: uses @solana/web3.js v1 Connection (not v2 RPC)
  */
 
 import express from "express";
 import { Connection, PublicKey } from "@solana/web3.js";
 
-const SOLANA_RPC_URL   = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
-const SERVER_PORT      = parseInt(process.env.POSITION_READER_PORT || process.env.PORT || "8002");
-const REQUEST_TIMEOUT  = 20_000;
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+const SERVER_PORT    = parseInt(process.env.PORT || "8002");
 
-// Kamino main lending markets on Solana Mainnet
 const KAMINO_LENDING_MARKETS = [
-  "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF", // Main market
-  "DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek", // JLP market
-  "ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5", // Altcoin market
+  "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+  "DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek",
+  "ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5",
 ];
 
-const KAMINO_DEFAULT_LIQUIDATION_THRESHOLD = 0.80;
-const MARGINFI_DEFAULT_LIQUIDATION_THRESHOLD = 0.80;
-
 // ─────────────────────────────────────────────────────────────
-// Kamino positions reader
+// Kamino (klend-sdk v1 — uses web3.js v1 Connection)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Fetches Kamino lending/borrowing positions for a wallet
- * across all known markets using the official klend-sdk.
- *
- * @param {string} walletAddressString
- * @returns {Promise<Array>}
- */
 async function fetchKaminoPositions(walletAddressString) {
   const allPositions = [];
 
-  // Dynamically import klend-sdk (handles ESM/CJS quirks)
-  let KaminoMarket, VanillaObligation, PROGRAM_ID;
+  let KaminoMarket, VanillaObligation;
   try {
-    const klendSdk = await import("@kamino-finance/klend-sdk");
-    KaminoMarket     = klendSdk.KaminoMarket;
-    VanillaObligation = klendSdk.VanillaObligation;
-    PROGRAM_ID       = klendSdk.PROGRAM_ID;
-  } catch (importError) {
-    console.error("[kamino] SDK import failed:", importError.message);
+    const sdk = await import("@kamino-finance/klend-sdk");
+    KaminoMarket      = sdk.KaminoMarket;
+    VanillaObligation = sdk.VanillaObligation;
+  } catch (err) {
+    console.error("[kamino] SDK import failed:", err.message);
     return [];
   }
 
+  // klend-sdk v1 uses the standard web3.js v1 Connection
   const connection   = new Connection(SOLANA_RPC_URL, "confirmed");
   const walletPubkey = new PublicKey(walletAddressString);
 
-  // Query each market in parallel
   const marketPromises = KAMINO_LENDING_MARKETS.map(async (marketAddress) => {
     try {
       const market = await KaminoMarket.load(
         connection,
         new PublicKey(marketAddress),
-        400 // recent slot duration ms
+        400
       );
 
-      const obligation = await market.getObligationByWallet(
-        walletPubkey,
-        new VanillaObligation(PROGRAM_ID)
-      );
+      if (!market) return [];
+
+      // VanillaObligation is the standard borrow/lend obligation type
+      const obligationClass = VanillaObligation
+        ? new VanillaObligation(market.programId)
+        : null;
+
+      const obligation = obligationClass
+        ? await market.getObligationByWallet(walletPubkey, obligationClass)
+        : await market.getObligationByWallet(walletPubkey);
 
       if (!obligation) return [];
 
-      // Extract borrows and deposits from the obligation
       const deposits = [];
       const borrows  = [];
 
-      for (const [reservePubkey, depositAmount] of obligation.deposits) {
-        const reserve = market.getReserveByAddress(reservePubkey);
-        if (!reserve) continue;
-        const symbol   = reserve.stats?.symbol || reserve.config?.tokenInfo?.symbol || "UNKNOWN";
-        const usdValue = depositAmount.toNumber() * (reserve.stats?.lastPrice || 0);
-        deposits.push({ symbol, amount: depositAmount.toNumber(), usdValue });
+      // Extract deposits
+      for (const [reservePk, deposit] of (obligation.deposits || new Map())) {
+        const reserve    = market.getReserveByAddress(reservePk);
+        const symbol     = reserve?.stats?.symbol || "UNKNOWN";
+        const amount     = typeof deposit.toNumber === "function"
+          ? deposit.toNumber()
+          : Number(deposit);
+        const usdValue   = amount * (reserve?.stats?.lastPrice || 1);
+        deposits.push({ symbol, amount, usdValue });
       }
 
-      for (const [reservePubkey, borrowAmount] of obligation.borrows) {
-        const reserve = market.getReserveByAddress(reservePubkey);
-        if (!reserve) continue;
-        const symbol   = reserve.stats?.symbol || reserve.config?.tokenInfo?.symbol || "UNKNOWN";
-        const usdValue = borrowAmount.toNumber() * (reserve.stats?.lastPrice || 0);
-        borrows.push({ symbol, amount: borrowAmount.toNumber(), usdValue });
+      // Extract borrows
+      for (const [reservePk, borrow] of (obligation.borrows || new Map())) {
+        const reserve  = market.getReserveByAddress(reservePk);
+        const symbol   = reserve?.stats?.symbol || "UNKNOWN";
+        const amount   = typeof borrow.toNumber === "function"
+          ? borrow.toNumber()
+          : Number(borrow);
+        const usdValue = amount * (reserve?.stats?.lastPrice || 1);
+        borrows.push({ symbol, amount, usdValue });
       }
 
-      // Skip deposit-only positions (no liquidation risk)
       if (borrows.length === 0) return [];
 
-      const totalCollateralUsd = deposits.reduce((sum, d) => sum + d.usdValue, 0);
-      const totalDebtUsd       = borrows.reduce((sum, b) => sum + b.usdValue, 0);
+      const totalCollateralUsd = deposits.reduce((s, d) => s + d.usdValue, 0);
+      const totalDebtUsd       = borrows.reduce((s, b)  => s + b.usdValue, 0);
 
       if (totalDebtUsd <= 0) return [];
 
-      const collateralRatio     = totalCollateralUsd / totalDebtUsd;
-      const liquidationLtv      = parseFloat(obligation.stats?.liquidationLtv || KAMINO_DEFAULT_LIQUIDATION_THRESHOLD);
+      const collateralRatio = totalCollateralUsd / totalDebtUsd;
+      const liquidationLtv  = parseFloat(
+        obligation.stats?.liquidationLtv || "0.80"
+      );
       const marginToLiquidation = ((collateralRatio - liquidationLtv) / liquidationLtv) * 100;
 
-      // Find largest collateral asset
-      const primaryCollateral = deposits.sort((depA, depB) => depB.usdValue - depA.usdValue)[0];
+      const primaryCollateral = [...deposits].sort((a, b) => b.usdValue - a.usdValue)[0];
 
-      // One position entry per borrow
       return borrows.map((borrow) => ({
         owner_wallet_address:          walletAddressString,
         protocol_name:                 "kamino",
@@ -123,20 +112,18 @@ async function fetchKaminoPositions(walletAddressString) {
         margin_to_liquidation_percent: marginToLiquidation,
       }));
 
-    } catch (marketError) {
-      // No position in this market — expected for most wallets
-      if (!marketError.message?.includes("null") && !marketError.message?.includes("not found")) {
-        console.error(`[kamino] Market ${marketAddress.slice(0, 8)} error:`, marketError.message);
+    } catch (err) {
+      if (!err.message?.includes("null") && !err.message?.includes("not found")) {
+        console.error(`[kamino] Market ${marketAddress.slice(0, 8)} error:`, err.message);
       }
       return [];
     }
   });
 
-  const marketResults = await Promise.allSettled(marketPromises);
-
-  for (const result of marketResults) {
-    if (result.status === "fulfilled" && Array.isArray(result.value)) {
-      allPositions.push(...result.value);
+  const results = await Promise.allSettled(marketPromises);
+  for (const r of results) {
+    if (r.status === "fulfilled" && Array.isArray(r.value)) {
+      allPositions.push(...r.value);
     }
   }
 
@@ -145,77 +132,68 @@ async function fetchKaminoPositions(walletAddressString) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Marginfi positions reader
+// Marginfi (SDK v6 — getConfig("production") string)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Fetches Marginfi lending/borrowing positions for a wallet
- * using the official marginfi-client-v2 SDK.
- *
- * @param {string} walletAddressString
- * @returns {Promise<Array>}
- */
 async function fetchMarginfiPositions(walletAddressString) {
-  let MarginfiClient, getConfig, Environment;
+  let MarginfiClient, getConfig;
   try {
-    const marginfiSdk = await import("@mrgnlabs/marginfi-client-v2");
-    MarginfiClient = marginfiSdk.MarginfiClient;
-    getConfig      = marginfiSdk.getConfig;
-    Environment    = marginfiSdk.Environment;
-  } catch (importError) {
-    console.error("[marginfi] SDK import failed:", importError.message);
+    const sdk  = await import("@mrgnlabs/marginfi-client-v2");
+    MarginfiClient = sdk.MarginfiClient;
+    getConfig      = sdk.getConfig;
+  } catch (err) {
+    console.error("[marginfi] SDK import failed:", err.message);
     return [];
   }
 
   try {
-    const connection     = new Connection(SOLANA_RPC_URL, "confirmed");
-    const marginfiConfig = getConfig(Environment.PRODUCTION);
-    const marginfiClient = await MarginfiClient.fetch(marginfiConfig, null, connection);
-    const ownerPubkey    = new PublicKey(walletAddressString);
+    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-    const marginfiAccounts = await marginfiClient.getMarginfiAccountsForAuthority(ownerPubkey);
+    // SDK v6: pass "production" as string, not Environment.PRODUCTION
+    const config = getConfig("production");
+    const client = await MarginfiClient.fetch(config, null, connection);
 
-    if (!marginfiAccounts || marginfiAccounts.length === 0) {
-      return [];
-    }
+    const ownerPubkey = new PublicKey(walletAddressString);
+    const accounts    = await client.getMarginfiAccountsForAuthority(ownerPubkey);
+
+    if (!accounts || accounts.length === 0) return [];
 
     const allPositions = [];
 
-    for (const account of marginfiAccounts) {
-      const activeBalances = account.activeBalances || [];
-      const borrowBalances = activeBalances.filter((b) => b.isBorrowingPosition?.());
+    for (const account of accounts) {
+      const balances       = account.activeBalances || [];
+      const borrowBalances = balances.filter((b) => b.isBorrowingPosition?.() === true);
 
       if (borrowBalances.length === 0) continue;
 
-      const healthComponents    = account.computeHealthComponents?.("Maint");
-      const totalCollateralUsd  = healthComponents?.assets?.toNumber() || 0;
-      const totalDebtUsd        = healthComponents?.liabilities?.toNumber() || 0;
+      const health = account.computeHealthComponents?.("Maint");
+      const totalCollateralUsd = health?.assets?.toNumber?.()      || 0;
+      const totalDebtUsd       = health?.liabilities?.toNumber?.() || 0;
 
       if (totalDebtUsd <= 0) continue;
 
-      const collateralRatio     = totalCollateralUsd / totalDebtUsd;
-      const liquidationThreshold = MARGINFI_DEFAULT_LIQUIDATION_THRESHOLD;
+      const collateralRatio      = totalCollateralUsd / totalDebtUsd;
+      const liquidationThreshold = 0.80;
       const marginToLiquidation  = ((collateralRatio - liquidationThreshold) / liquidationThreshold) * 100;
 
-      // Find primary collateral (largest deposit)
-      const depositBalances = activeBalances.filter((b) => b.isLendingPosition?.());
-      const primaryDeposit  = depositBalances.sort((depA, depB) => {
-        const aValue = depA.getQuantityUi?.()?.assets?.toNumber() || 0;
-        const bValue = depB.getQuantityUi?.()?.assets?.toNumber() || 0;
-        return bValue - aValue;
+      const depositBalances = balances.filter((b) => b.isLendingPosition?.() === true);
+      const primaryDeposit  = depositBalances.sort((a, b) => {
+        const aAmt = a.getQuantityUi?.()?.assets?.toNumber?.() || 0;
+        const bAmt = b.getQuantityUi?.()?.assets?.toNumber?.() || 0;
+        return bAmt - aAmt;
       })[0];
 
       const collateralSymbol = primaryDeposit
-        ? (account.client?.getBankByPk(primaryDeposit.bankPk)?.tokenSymbol || "UNKNOWN")
+        ? (client.getBankByPk?.(primaryDeposit.bankPk)?.tokenSymbol || "UNKNOWN")
         : "UNKNOWN";
       const collateralAmount = primaryDeposit
-        ? (primaryDeposit.getQuantityUi?.()?.assets?.toNumber() || 0)
+        ? (primaryDeposit.getQuantityUi?.()?.assets?.toNumber?.() || 0)
         : 0;
 
-      for (const borrowBalance of borrowBalances) {
-        const bank          = account.client?.getBankByPk(borrowBalance.bankPk);
-        const borrowSymbol  = bank?.tokenSymbol || "UNKNOWN";
-        const borrowAmount  = borrowBalance.getQuantityUi?.()?.liabilities?.toNumber() || 0;
+      for (const borrow of borrowBalances) {
+        const bank         = client.getBankByPk?.(borrow.bankPk);
+        const borrowSymbol = bank?.tokenSymbol || "UNKNOWN";
+        const borrowAmount = borrow.getQuantityUi?.()?.liabilities?.toNumber?.() || 0;
 
         allPositions.push({
           owner_wallet_address:          walletAddressString,
@@ -234,62 +212,47 @@ async function fetchMarginfiPositions(walletAddressString) {
     console.log(`[marginfi] Found ${allPositions.length} positions for ${walletAddressString.slice(0, 8)}…`);
     return allPositions;
 
-  } catch (fetchError) {
-    console.error("[marginfi] Fetch error:", fetchError.message);
+  } catch (err) {
+    console.error("[marginfi] Fetch error:", err.message);
     return [];
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-// Express HTTP server
+// Express server
 // ─────────────────────────────────────────────────────────────
 
-const expressApp = express();
-expressApp.use(express.json());
+const app = express();
+app.use(express.json());
 
-/**
- * GET /positions/:walletAddress
- *
- * Returns all open lending/borrowing positions for a wallet
- * across Marginfi and Kamino, combined into one array.
- */
-expressApp.get("/positions/:walletAddress", async (req, res) => {
+app.get("/positions/:walletAddress", async (req, res) => {
   const { walletAddress } = req.params;
 
   if (!walletAddress || walletAddress.length < 32 || walletAddress.length > 44) {
     return res.status(400).json({ error: "Invalid Solana wallet address" });
   }
 
-  try {
-    // Fetch from both protocols in parallel
-    const [marginfiPositions, kaminoPositions] = await Promise.allSettled([
-      fetchMarginfiPositions(walletAddress),
-      fetchKaminoPositions(walletAddress),
-    ]);
+  const [marginfiResult, kaminoResult] = await Promise.allSettled([
+    fetchMarginfiPositions(walletAddress),
+    fetchKaminoPositions(walletAddress),
+  ]);
 
-    const allPositions = [
-      ...(marginfiPositions.status === "fulfilled" ? marginfiPositions.value : []),
-      ...(kaminoPositions.status  === "fulfilled" ? kaminoPositions.value  : []),
-    ];
+  const marginfiPositions = marginfiResult.status === "fulfilled" ? marginfiResult.value : [];
+  const kaminoPositions   = kaminoResult.status  === "fulfilled" ? kaminoResult.value  : [];
+  const allPositions      = [...marginfiPositions, ...kaminoPositions];
 
-    return res.json({
-      wallet_address:  walletAddress,
-      open_positions:  allPositions,
-      marginfi_count:  marginfiPositions.status === "fulfilled" ? marginfiPositions.value.length : 0,
-      kamino_count:    kaminoPositions.status   === "fulfilled" ? kaminoPositions.value.length   : 0,
-      fetched_at:      Math.floor(Date.now() / 1000),
-    });
-
-  } catch (unexpectedError) {
-    console.error("[reader] Unexpected error:", unexpectedError.message);
-    return res.status(500).json({ error: unexpectedError.message });
-  }
+  return res.json({
+    wallet_address:  walletAddress,
+    open_positions:  allPositions,
+    marginfi_count:  marginfiPositions.length,
+    kamino_count:    kaminoPositions.length,
+    fetched_at:      Math.floor(Date.now() / 1000),
+  });
 });
 
-/** GET /health */
-expressApp.get("/health", (_req, res) => res.json({ status: "ok", service: "position-reader" }));
+app.get("/health", (_req, res) => res.json({ status: "ok", service: "position-reader" }));
 
-expressApp.listen(SERVER_PORT, () => {
+app.listen(SERVER_PORT, () => {
   console.log(`[position-reader] Listening on port ${SERVER_PORT}`);
   console.log(`[position-reader] RPC: ${SOLANA_RPC_URL}`);
   console.log(`[position-reader] Protocols: Marginfi + Kamino (${KAMINO_LENDING_MARKETS.length} markets)`);

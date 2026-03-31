@@ -1,17 +1,16 @@
 {
   "name": "pythguard-position-reader",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
-  "description": "PythGuard position reader — Marginfi + Kamino using official SDKs",
+  "description": "PythGuard position reader — Marginfi + Kamino",
   "main": "marginfi_reader.js",
   "scripts": {
-    "start": "node marginfi_reader.js",
-    "dev":   "node --watch marginfi_reader.js"
+    "start": "node marginfi_reader.js"
   },
   "dependencies": {
     "@mrgnlabs/marginfi-client-v2": "^6.4.1",
     "@mrgnlabs/mrgn-common": "latest",
-    "@kamino-finance/klend-sdk": "latest",
+    "@kamino-finance/klend-sdk": "^1.2.0",
     "@solana/web3.js": "^1.91.0",
     "express": "^4.18.2"
   }
